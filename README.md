@@ -27,6 +27,7 @@ A modern, terminal-based file manager with a clean and intuitive interface.
 
 2.  **Run the setup script:**
     ```bash
+    chmod +x setup.sh
     ./setup.sh
     ```
 
