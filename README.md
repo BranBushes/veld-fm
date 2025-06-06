@@ -2,7 +2,7 @@
 
 A modern, terminal-based file manager with a clean and intuitive interface.
 
-![A screenshot of the veld file manager in action.](https://raw.githubusercontent.com/your-username/veld/main/.assets/veld-screenshot.png)
+![A screenshot of the veld file manager in action.](https://raw.githubusercontent.com/BranBushes/veld-fm/master/.assets/ss.png)
 
 ---
 
