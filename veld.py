@@ -27,7 +27,6 @@ class SelectableDirectoryTree(DirectoryTree):
         """Render a node's label with a custom style if it's selected."""
         rendered_label = super().render_label(node, base_style, style)
 
-        # *** FIX #1: Access .path directly on the DirEntry object ***
         node_path = node.data.path
 
         if node_path in self.app_ref.selected_paths:
@@ -46,6 +45,8 @@ class FileExplorerApp(App):
     BINDINGS = [
         ("q", "quit", "Quit"),
         ("space", "toggle_selection", "Toggle Selection"),
+        ("n", "rename", "Rename"),
+        ("d", "create_directory", "New Directory"),
         ("r", "delete_selected", "Delete Selected"),
         ("m", "move_selected", "Move Selected"),
         ("c", "copy_selected", "Copy Selected"),
@@ -63,7 +64,6 @@ class FileExplorerApp(App):
 
     def on_mount(self) -> None:
         """Set the initial cursor path when the app starts."""
-        # *** FIX #2: Access .path directly after ensuring cursor_node exists ***
         if self.directory_tree.cursor_node and self.directory_tree.cursor_node.data:
             self.cursor_path = self.directory_tree.cursor_node.data.path
             self._update_path_label()
@@ -77,7 +77,6 @@ class FileExplorerApp(App):
 
     def on_tree_node_highlighted(self, event: Tree.NodeHighlighted[DirEntry]) -> None:
         """Handle the node being highlighted in the DirectoryTree."""
-        # *** FIX #3: Access .path directly from the event's node data ***
         if event.node and event.node.data:
             self.cursor_path = event.node.data.path
             self._update_path_label()
@@ -125,6 +124,24 @@ class FileExplorerApp(App):
             self.mount(input_widget)
             self.set_focus(input_widget)
 
+    def action_rename(self) -> None:
+        """Prompt to rename the currently highlighted item."""
+        if self.cursor_path and not self.query(Input):
+            self.current_action = "rename"
+            input_widget = Input(
+                value=self.cursor_path.name, placeholder="Rename to:"
+            )
+            self.mount(input_widget)
+            self.set_focus(input_widget)
+
+    def action_create_directory(self) -> None:
+        """Prompt for the name of a new directory to create."""
+        if not self.query(Input):
+            self.current_action = "create_directory"
+            input_widget = Input(placeholder="New directory name:")
+            self.mount(input_widget)
+            self.set_focus(input_widget)
+
     def on_input_submitted(self, event: Input.Submitted) -> None:
         """Handle the submission of the input."""
         user_input = event.value.strip()
@@ -133,8 +150,13 @@ class FileExplorerApp(App):
             self._handle_delete(user_input)
         elif self.current_action in ("move", "copy"):
             self._handle_move_copy(user_input)
+        elif self.current_action == "rename":
+            self._handle_rename(user_input)
+        elif self.current_action == "create_directory":
+            self._handle_create_directory(user_input)
 
-        event.input.remove()
+        if event.input.parent:
+            event.input.remove()
         self.current_action = None
 
     def _handle_delete(self, user_input: str) -> None:
@@ -152,7 +174,7 @@ class FileExplorerApp(App):
                 self.directory_tree.reload()
 
                 self.selected_paths.clear()
-                self.cursor_path = None  # Reset cursor path
+                self.cursor_path = None
                 self._update_path_label()
 
             except Exception as e:
@@ -184,7 +206,7 @@ class FileExplorerApp(App):
                 elif self.current_action == "copy":
                     if src_path.is_dir():
                         shutil.copytree(src_path, dest_path / src_path.name)
-                    else:  # is_file()
+                    else:
                         shutil.copy(src_path, dest_path)
 
             self.notify(f"{num_items} item(s) {action_past_tense} to '{dest_path}'.")
@@ -194,6 +216,57 @@ class FileExplorerApp(App):
 
         except Exception as e:
             self.notify(f"Error {self.current_action}ing: {e}", severity="error")
+
+    def _handle_rename(self, new_name: str) -> None:
+        """Handles renaming the highlighted file or directory."""
+        if not self.cursor_path or not new_name:
+            return
+
+        try:
+            new_path = self.cursor_path.with_name(new_name)
+            if new_path.exists():
+                self.notify(f"Error: '{new_name}' already exists.", severity="error")
+                return
+
+            self.cursor_path.rename(new_path)
+            self.notify(f"Renamed '{self.cursor_path.name}' to '{new_name}'.")
+
+            if self.cursor_path in self.selected_paths:
+                self.selected_paths.remove(self.cursor_path)
+                self.selected_paths.add(new_path)
+
+            self.cursor_path = new_path
+            self.directory_tree.reload()
+            self._update_path_label()
+
+        except Exception as e:
+            self.notify(f"Error renaming: {e}", severity="error")
+
+    def _handle_create_directory(self, dir_name: str) -> None:
+        """Handles creating a new directory."""
+        if not dir_name:
+            return
+
+        parent_dir = self.directory_tree.path
+        if self.cursor_path:
+            parent_dir = (
+                self.cursor_path if self.cursor_path.is_dir() else self.cursor_path.parent
+            )
+
+        try:
+            new_dir_path = parent_dir / dir_name
+            if new_dir_path.exists():
+                self.notify(
+                    f"Error: Directory '{dir_name}' already exists.", severity="error"
+                )
+                return
+
+            new_dir_path.mkdir()
+            self.notify(f"Created directory '{dir_name}'.")
+            self.directory_tree.reload()
+
+        except Exception as e:
+            self.notify(f"Error creating directory: {e}", severity="error")
 
 
 if __name__ == "__main__":
