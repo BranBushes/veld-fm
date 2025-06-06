@@ -1,2 +1,4 @@
 # Ignore the Python virtual environment directory
 .venv/
+
+file_index.txt
