@@ -1,0 +1,11 @@
+attrs==24.1.0
+cffi==1.17.1
+cryptography==45.0.3
+dbus-python==1.4.0
+filelock==3.18.0
+packaging==25.0
+pwquality==1.4.5
+pycparser==2.22
+PyGObject==3.52.3
+pyxdg==0.28
+wheel==0.45.1
