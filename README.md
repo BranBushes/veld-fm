@@ -21,7 +21,7 @@ A modern, terminal-based file manager with a clean and intuitive interface.
 
 1.  **Clone the repository:**
     ```bash
-    git clone https://github.com/your-username/veld.git
+    git clone https://github.com/BranBushes/veld-fm.git
     cd veld
     ```
 
