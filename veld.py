@@ -1,0 +1,201 @@
+import os
+import shutil
+from pathlib import Path
+from typing import Optional, Set
+
+from rich.style import Style
+from rich.text import Text
+from textual.app import App, ComposeResult, RenderResult
+from textual.events import Key
+from textual.widgets import DirectoryTree, Footer, Input, Label, Tree
+from textual.widgets._directory_tree import DirEntry
+from textual.widgets.tree import TreeNode
+
+
+class SelectableDirectoryTree(DirectoryTree):
+    """A DirectoryTree that highlights selected nodes."""
+
+    def __init__(
+        self, path: str, *, app: App, id: str | None = None, name: str | None = None
+    ) -> None:
+        self.app_ref = app
+        super().__init__(path, id=id, name=name)
+
+    def render_label(
+        self, node: TreeNode[DirEntry], base_style: Style, style: Style
+    ) -> RenderResult:
+        """Render a node's label with a custom style if it's selected."""
+        rendered_label = super().render_label(node, base_style, style)
+
+        # *** FIX #1: Access .path directly on the DirEntry object ***
+        node_path = node.data.path
+
+        if node_path in self.app_ref.selected_paths:
+            rendered_label.style = "b black on green"
+
+        return rendered_label
+
+
+class FileExplorerApp(App):
+    """A file explorer app with multi-file selection and deletion."""
+
+    selected_paths: Set[Path] = set()
+    cursor_path: Path | None = None
+    current_action: Optional[str] = None
+
+    BINDINGS = [
+        ("q", "quit", "Quit"),
+        ("space", "toggle_selection", "Toggle Selection"),
+        ("r", "delete_selected", "Delete Selected"),
+        ("m", "move_selected", "Move Selected"),
+        ("c", "copy_selected", "Copy Selected"),
+    ]
+
+    def compose(self) -> ComposeResult:
+        """Create the child widgets for the app."""
+        home_path = str(Path.home())
+        self.directory_tree = SelectableDirectoryTree(
+            home_path, app=self, id="dir_tree"
+        )
+        yield self.directory_tree
+        yield Label(id="path_label")
+        yield Footer()
+
+    def on_mount(self) -> None:
+        """Set the initial cursor path when the app starts."""
+        # *** FIX #2: Access .path directly after ensuring cursor_node exists ***
+        if self.directory_tree.cursor_node and self.directory_tree.cursor_node.data:
+            self.cursor_path = self.directory_tree.cursor_node.data.path
+            self._update_path_label()
+
+    def _update_path_label(self) -> None:
+        """Updates the path label with the current cursor and selection status."""
+        cursor_str = str(self.cursor_path) if self.cursor_path else "None"
+        label_text = f"Highlighted: {cursor_str}\n"
+        label_text += f"Selected: {len(self.selected_paths)} item(s)"
+        self.query_one("#path_label", Label).update(label_text)
+
+    def on_tree_node_highlighted(self, event: Tree.NodeHighlighted[DirEntry]) -> None:
+        """Handle the node being highlighted in the DirectoryTree."""
+        # *** FIX #3: Access .path directly from the event's node data ***
+        if event.node and event.node.data:
+            self.cursor_path = event.node.data.path
+            self._update_path_label()
+
+    def on_key(self, event: Key) -> None:
+        """Handle key presses."""
+        if event.key == "space":
+            event.prevent_default()
+            self.action_toggle_selection()
+
+    def action_toggle_selection(self) -> None:
+        """Toggle the selection of the currently highlighted path."""
+        if self.cursor_path:
+            if self.cursor_path in self.selected_paths:
+                self.selected_paths.remove(self.cursor_path)
+            else:
+                self.selected_paths.add(self.cursor_path)
+
+            self.directory_tree.refresh()
+            self._update_path_label()
+
+    def action_delete_selected(self) -> None:
+        """Prompt for deletion when 'r' is pressed and paths are selected."""
+        if self.selected_paths and not self.query(Input):
+            self.current_action = "delete"
+            input_widget = Input(
+                placeholder=f"Delete {len(self.selected_paths)} items? (y/n)"
+            )
+            self.mount(input_widget)
+            self.set_focus(input_widget)
+
+    def action_move_selected(self) -> None:
+        """Prompt for a destination path to move selected items."""
+        if self.selected_paths and not self.query(Input):
+            self.current_action = "move"
+            input_widget = Input(placeholder="Move to:")
+            self.mount(input_widget)
+            self.set_focus(input_widget)
+
+    def action_copy_selected(self) -> None:
+        """Prompt for a destination path to copy selected items."""
+        if self.selected_paths and not self.query(Input):
+            self.current_action = "copy"
+            input_widget = Input(placeholder="Copy to:")
+            self.mount(input_widget)
+            self.set_focus(input_widget)
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        """Handle the submission of the input."""
+        user_input = event.value.strip()
+
+        if self.current_action == "delete":
+            self._handle_delete(user_input)
+        elif self.current_action in ("move", "copy"):
+            self._handle_move_copy(user_input)
+
+        event.input.remove()
+        self.current_action = None
+
+    def _handle_delete(self, user_input: str) -> None:
+        """Handles the deletion of selected files and directories."""
+        if user_input.lower() == "y" and self.selected_paths:
+            try:
+                num_deleted = len(self.selected_paths)
+                for path in list(self.selected_paths):
+                    if path.is_dir():
+                        shutil.rmtree(path)
+                    elif path.is_file():
+                        path.unlink()
+
+                self.notify(f"Deleted {num_deleted} items.")
+                self.directory_tree.reload()
+
+                self.selected_paths.clear()
+                self.cursor_path = None  # Reset cursor path
+                self._update_path_label()
+
+            except Exception as e:
+                self.notify(f"Error deleting: {e}", severity="error")
+
+        elif user_input.lower() == "n":
+            self.notify("Deletion canceled.")
+        else:
+            self.notify("Invalid input. Please enter 'y' or 'n'.", severity="warning")
+
+    def _handle_move_copy(self, dest_path_str: str) -> None:
+        """Handles moving or copying selected files and directories."""
+        dest_path = Path(dest_path_str).expanduser()
+
+        if not dest_path.exists() or not dest_path.is_dir():
+            self.notify(
+                f"Error: Destination '{dest_path}' is not a valid directory.",
+                severity="error",
+            )
+            return
+
+        try:
+            num_items = len(self.selected_paths)
+            action_past_tense = "moved" if self.current_action == "move" else "copied"
+
+            for src_path in list(self.selected_paths):
+                if self.current_action == "move":
+                    shutil.move(str(src_path), str(dest_path))
+                elif self.current_action == "copy":
+                    if src_path.is_dir():
+                        shutil.copytree(src_path, dest_path / src_path.name)
+                    else:  # is_file()
+                        shutil.copy(src_path, dest_path)
+
+            self.notify(f"{num_items} item(s) {action_past_tense} to '{dest_path}'.")
+            self.directory_tree.reload()
+            self.selected_paths.clear()
+            self._update_path_label()
+
+        except Exception as e:
+            self.notify(f"Error {self.current_action}ing: {e}", severity="error")
+
+
+if __name__ == "__main__":
+    app = FileExplorerApp()
+    app.run()
