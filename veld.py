@@ -5,7 +5,7 @@ from typing import Optional, Set
 
 from rich.style import Style
 from rich.text import Text
-from textual.app import App, ComposeResult, RenderResult
+from textual.app import App, ComposeResult
 from textual.events import Key
 from textual.widgets import DirectoryTree, Footer, Input, Label, Tree
 from textual.widgets._directory_tree import DirEntry
@@ -16,22 +16,20 @@ class SelectableDirectoryTree(DirectoryTree):
     """A DirectoryTree that highlights selected nodes."""
 
     def __init__(
-        self, path: str, *, app: App, id: str | None = None, name: str | None = None
+        self, path: str, *, app: "FileExplorerApp", id: str | None = None, name: str | None = None
     ) -> None:
         self.app_ref = app
         super().__init__(path, id=id, name=name)
 
     def render_label(
         self, node: TreeNode[DirEntry], base_style: Style, style: Style
-    ) -> RenderResult:
+    ) -> Text:
         """Render a node's label with a custom style if it's selected."""
         rendered_label = super().render_label(node, base_style, style)
-
-        node_path = node.data.path
-
-        if node_path in self.app_ref.selected_paths:
-            rendered_label.style = "b black on green"
-
+        if node.data:
+            node_path = node.data.path
+            if node_path in self.app_ref.selected_paths:
+                rendered_label.style = "b black on green"
         return rendered_label
 
 
@@ -247,7 +245,7 @@ class FileExplorerApp(App):
         if not dir_name:
             return
 
-        parent_dir = self.directory_tree.path
+        parent_dir = Path(self.directory_tree.path)
         if self.cursor_path:
             parent_dir = (
                 self.cursor_path if self.cursor_path.is_dir() else self.cursor_path.parent
