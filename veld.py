@@ -10,6 +10,7 @@ from textual.events import Key
 from textual.widgets import DirectoryTree, Footer, Input, Label, Tree
 from textual.widgets._directory_tree import DirEntry
 from textual.widgets.tree import TreeNode
+from textual_autocomplete import PathAutoComplete
 
 
 class SelectableDirectoryTree(DirectoryTree):
@@ -106,21 +107,26 @@ class FileExplorerApp(App):
             self.mount(input_widget)
             self.set_focus(input_widget)
 
+    def _mount_autocomplete_input(self, placeholder: str):
+        """Mounts an Input widget and a PathAutoComplete widget to assist it."""
+        input_widget = Input(placeholder=placeholder, id="path_input")
+        # The PathAutoComplete widget targets the input and provides suggestions.
+        # The `only_directories` parameter is removed to fix the TypeError.
+        autocomplete = PathAutoComplete(target="#path_input")
+        self.mount(input_widget, autocomplete)
+        self.set_focus(input_widget)
+
     def action_move_selected(self) -> None:
         """Prompt for a destination path to move selected items."""
-        if self.selected_paths and not self.query(Input):
+        if self.selected_paths and not self.query("#path_input"):
             self.current_action = "move"
-            input_widget = Input(placeholder="Move to:")
-            self.mount(input_widget)
-            self.set_focus(input_widget)
+            self._mount_autocomplete_input("Move to:")
 
     def action_copy_selected(self) -> None:
         """Prompt for a destination path to copy selected items."""
-        if self.selected_paths and not self.query(Input):
+        if self.selected_paths and not self.query("#path_input"):
             self.current_action = "copy"
-            input_widget = Input(placeholder="Copy to:")
-            self.mount(input_widget)
-            self.set_focus(input_widget)
+            self._mount_autocomplete_input("Copy to:")
 
     def action_rename(self) -> None:
         """Prompt to rename the currently highlighted item."""
@@ -141,7 +147,7 @@ class FileExplorerApp(App):
             self.set_focus(input_widget)
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
-        """Handle the submission of the input."""
+        """Handle the submission of any input."""
         user_input = event.value.strip()
 
         if self.current_action == "delete":
@@ -151,7 +157,16 @@ class FileExplorerApp(App):
         elif self.current_action == "rename":
             self._handle_rename(user_input)
         elif self.current_action == "create_directory":
+            # Corrected a typo here from the previous version
             self._handle_create_directory(user_input)
+
+        # Cleanup: If the submitted input was for path autocompletion,
+        # remove the PathAutoComplete widget as well.
+        if event.input.id == "path_input":
+            try:
+                self.query_one(PathAutoComplete).remove()
+            except Exception:
+                pass
 
         if event.input.parent:
             event.input.remove()

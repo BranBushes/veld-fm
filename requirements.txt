@@ -6,5 +6,6 @@ platformdirs==4.3.8
 Pygments==2.19.1
 rich==14.0.0
 textual==3.3.0
+textual-autocomplete==4.0.4
 typing_extensions==4.14.0
 uc-micro-py==1.0.3
