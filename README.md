@@ -16,7 +16,7 @@ A modern, terminal-based file manager with a clean and intuitive interface.
 *   **File Operations:** Perform common file operations like copy, move, delete, and rename.
 *   **Modern Interface:** A clean and aesthetically pleasing interface that doesn't get in your way.
 *   **Cross-Platform:** `veld` is built with Python and should run on any system that supports it.
-*   **Customizable Keybindings:** Change keybindings by editing a simple configuration file.
+*   **Customizable Keybindings:** Change keybindings by editing a simple configuration file at ~/.config/veld-fm/config.toml
 
 ## Installation
 
