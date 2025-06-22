@@ -16,6 +16,7 @@ A modern, terminal-based file manager with a clean and intuitive interface.
 *   **File Operations:** Perform common file operations like copy, move, delete, and rename.
 *   **Modern Interface:** A clean and aesthetically pleasing interface that doesn't get in your way.
 *   **Cross-Platform:** `veld` is built with Python and should run on any system that supports it.
+*   **Customizable Keybindings:** Change keybindings by editing a simple configuration file.
 
 ## Installation
 
@@ -26,6 +27,7 @@ A modern, terminal-based file manager with a clean and intuitive interface.
     ```
 
 2.  **Run the setup script:**
+    This will install dependencies and create the `veld` command.
     ```bash
     chmod +x setup.sh
     ./setup.sh
@@ -33,26 +35,11 @@ A modern, terminal-based file manager with a clean and intuitive interface.
 
 ## Usage
 
-Once installed, you can run `veld` from anywhere in your terminal:
+Once installed, you can run `veld` from anywhere in your terminal. You can also provide an optional starting directory.
 
 ```bash
+# Start in the default home directory
 veld
-```
 
-## Keybindings
-
-| Key         | Action                |
-|-------------|-----------------------|
-| **q**       | Quit the application  |
-| **space**   | Toggle file selection |
-| **n**       | Rename a file         |
-| **d**       | Create a directory    |
-| **r**       | Delete selected files |
-| **m**       | Move selected files   |
-| **c**       | Copy selected files   |
-
----
-
-<p align="center">
-  Made with ❤️ from Bangladesh!
-</p>
+# Start in the ~/Documents directory
+veld ~/Documents
