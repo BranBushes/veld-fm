@@ -2,6 +2,6 @@
 .venv/
 
 # Some files to help with development
-ai_prompt.txt
+prompt_file.txt
 write_prompt.py
 .ropeproject/
