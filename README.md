@@ -43,3 +43,22 @@ veld
 
 # Start in the ~/Documents directory
 veld ~/Documents
+```
+
+## Default Keybindings
+
+| Key         | Action                |
+|-------------|-----------------------|
+| **q**       | Quit the application  |
+| **space**   | Toggle file selection |
+| **n**       | Rename a file         |
+| **d**       | Create a directory    |
+| **r**       | Delete selected files |
+| **m**       | Move selected files   |
+| **c**       | Copy selected files   |
+
+---
+
+<p align="center">
+  Made with ❤️ from Bangladesh!
+</p>
