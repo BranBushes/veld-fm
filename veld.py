@@ -323,7 +323,10 @@ class FileExplorerApp(App):
             self.action_target_panel = panel
             self._prompt("New directory name:", autocomplete=False)
 
-if __name__ == "__main__":
+def main():
     start_dir = sys.argv[1] if len(sys.argv) > 1 else None
     app = FileExplorerApp(start_path=start_dir)
     app.run()
+
+if __name__ == "__main__":
+    main()
