@@ -1,8 +1,10 @@
+import os
 import shutil
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
-from typing import Optional, Set
+from typing import Optional, Set, cast
 
 if sys.version_info >= (3, 11):
     import tomllib
@@ -32,6 +34,7 @@ DEFAULT_KEYBINDINGS = {
     "add_panel": {"key": "o", "description": "Open Panel"},
     "close_panel": {"key": "w", "description": "Close Panel"},
     "toggle_selection": {"key": "space", "description": "Select"},
+    "open_file": {"key": "enter", "description": "Open File"},
     "rename": {"key": "n", "description": "Rename"},
     "create_directory": {"key": "d", "description": "New Dir"},
     "delete_selected": {"key": "r", "description": "Delete"},
@@ -92,11 +95,21 @@ class SelectableDirectoryTree(DirectoryTree):
         return rendered
 
     def on_key(self, event: Key) -> None:
+        """Called when the user presses a key."""
         if event.key == self.key_map.get("toggle_selection"):
             event.prevent_default()
             self.panel_ref.action_toggle_selection()
+        elif event.key == self.key_map.get("open_file"):
+            if self.panel_ref.cursor_path and self.panel_ref.cursor_path.is_file():
+                event.prevent_default()
+                # --- THIS IS THE FIX ---
+                # We `cast` self.app to our specific class to satisfy the linter.
+                cast("FileExplorerApp", self.app).action_open_file()
 
 class FilePanel(Vertical):
+    # We remove the incorrect override from here.
+    # app: "FileExplorerApp" <--- This line is deleted.
+
     def __init__(self, path: str, *, key_map: dict, **kwargs) -> None:
         super().__init__(**kwargs)
         self.start_path = path
@@ -140,9 +153,7 @@ class FilePanel(Vertical):
             self.directory_tree.refresh()
             self.update_path_label()
 
-
     def handle_file_operation(self, operation: str, src_paths: list[Path], dest_path: Path) -> None:
-        """Performs the core file operation (move or copy). Does not notify or refresh."""
         for src_path in src_paths:
             if operation == "move":
                 shutil.move(str(src_path), str(dest_path))
@@ -272,32 +283,21 @@ class FileExplorerApp(App):
                     self.notify(f"Extracted to '{dest_path}'.")
                     self._refresh_panels_at_path(dest_path)
                 except Exception as e: self.notify(f"Error extracting archive: {e}", severity="error")
-
-
         elif action in ("move", "copy"):
             dest_path = Path(user_input).expanduser()
             if not dest_path.is_dir():
                 self.notify(f"Error: '{dest_path}' is not a valid directory.", severity="error")
                 return
             try:
-                # Store original paths for refresh logic before the operation
                 src_paths = list(panel.selected_paths)
                 src_parent_dirs = {p.parent for p in src_paths if p.parent}
-
-                # Perform the operation
                 panel.handle_file_operation(action, src_paths, dest_path)
-
-                # Notify and refresh
                 op_past_tense = "moved" if action == "move" else "copied"
                 self.notify(f"{len(src_paths)} item(s) {op_past_tense} to '{dest_path}'.")
-
                 if action == "move":
                     for d in src_parent_dirs: self._refresh_panels_at_path(d)
-
                 self._refresh_panels_at_path(dest_path)
-            except Exception as e:
-                self.notify(f"Error {action}ing: {e}", severity="error")
-
+            except Exception as e: self.notify(f"Error {action}ing: {e}", severity="error")
         elif action == "rename" and panel.cursor_path:
             try:
                 old_path = panel.cursor_path
@@ -319,6 +319,24 @@ class FileExplorerApp(App):
             except Exception as e: self.notify(f"Error creating directory: {e}", severity="error")
 
     # --- Action Methods ---
+    def action_open_file(self) -> None:
+        """Opens the highlighted file using the system's default application."""
+        panel = self.active_panel
+        if panel and panel.cursor_path and panel.cursor_path.is_file():
+            file_path = panel.cursor_path
+            try:
+                self.notify(f"Opening {file_path.name}...")
+                if sys.platform == "win32":
+                    os.startfile(file_path)
+                elif sys.platform == "darwin":  # macOS
+                    subprocess.run(["open", file_path], check=True)
+                else:  # Linux and other Unix-like OS
+                    subprocess.run(["xdg-open", file_path], check=True, stderr=subprocess.DEVNULL)
+            except FileNotFoundError:
+                self.notify(f"Error: Command not found. Cannot open file.", severity="error")
+            except Exception as e:
+                self.notify(f"Error opening file: {e}", severity="error")
+
     def action_add_panel(self) -> None:
         self.current_action = "add_panel"
         self._prompt("Open path:", autocomplete=True)

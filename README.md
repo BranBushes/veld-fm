@@ -83,6 +83,7 @@ Keybindings are organized by function and can be fully customized (see Configura
 
 | Key         | Action                |
 |-------------|-----------------------|
+| **enter**   | Open file or directory |
 | **space**   | Toggle file selection |
 | **n**       | Rename a file         |
 | **d**       | Create a directory    |
