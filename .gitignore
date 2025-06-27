@@ -5,3 +5,5 @@
 prompt_file.txt
 write_prompt.py
 .ropeproject/
+__pycache__/
+veld_fm.egg-info/
