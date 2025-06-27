@@ -4,7 +4,7 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
-from typing import Optional, Set, cast
+from typing import Iterable, Optional, Set, cast
 
 if sys.version_info >= (3, 11):
     import tomllib
@@ -33,8 +33,10 @@ DEFAULT_KEYBINDINGS = {
     "quit": {"key": "q", "description": "Quit"},
     "add_panel": {"key": "o", "description": "Open Panel"},
     "close_panel": {"key": "w", "description": "Close Panel"},
+    "close_search_panel": {"key": "backspace", "description": "Close Search"},
     "toggle_selection": {"key": "space", "description": "Select"},
     "open_file": {"key": "enter", "description": "Open File"},
+    "find": {"key": "f", "description": "Find"},
     "rename": {"key": "n", "description": "Rename"},
     "create_directory": {"key": "d", "description": "New Dir"},
     "delete_selected": {"key": "r", "description": "Delete"},
@@ -47,6 +49,7 @@ DEFAULT_KEYBINDINGS = {
 SUPPORTED_ARCHIVE_EXTENSIONS = tuple(
     ext for _, exts, _ in shutil.get_unpack_formats() for ext in exts
 )
+
 
 def generate_duplicate_path(original_path: Path) -> Path:
     parent = original_path.parent
@@ -76,16 +79,38 @@ def load_or_create_config() -> dict:
 
     try:
         if sys.version_info >= (3, 11):
-            with open(config_path, "rb") as f: user_config = tomllib.load(f)
+            with open(config_path, "rb") as f:
+                user_config = tomllib.load(f)
         else:
-            with open(config_path, "r", encoding="utf-8") as f: user_config = toml.load(f)
+            with open(config_path, "r", encoding="utf-8") as f:
+                user_config = toml.load(f)
         keybindings.update(user_config.get("keybindings", {}))
     except Exception:
         return keybindings
     return keybindings
 
-# --- Tiling Components ---
 
+# --- Search Functionality ---
+class SearchResultTree(Tree[Path]):
+    def __init__(self, search_results: Iterable[Path], **kwargs) -> None:
+        super().__init__("Search Results", data=Path(), **kwargs)
+        self.search_results = search_results
+
+    def on_mount(self) -> None:
+        for path in self.search_results:
+            self.root.add(str(path), data=path)
+
+
+class SearchPanel(Vertical):
+    def __init__(self, search_results: Iterable[Path], **kwargs) -> None:
+        super().__init__(**kwargs)
+        self.search_results = search_results
+
+    def compose(self) -> ComposeResult:
+        yield SearchResultTree(self.search_results, id="search_tree")
+
+
+# --- Tiling Components ---
 class SelectableDirectoryTree(DirectoryTree):
     def __init__(self, path: str, *, panel: "FilePanel", key_map: dict, id: str | None = None) -> None:
         self.panel_ref = panel
@@ -114,6 +139,7 @@ class SelectableDirectoryTree(DirectoryTree):
             if self.panel_ref.cursor_path and self.panel_ref.cursor_path.is_file():
                 event.prevent_default()
                 cast("FileExplorerApp", self.app).action_open_file()
+
 
 class FilePanel(Vertical):
     def __init__(self, path: str, *, key_map: dict, **kwargs) -> None:
@@ -164,10 +190,10 @@ class FileExplorerApp(App):
     DEFAULT_CSS = """
     Screen { layers: base input; }
     #main_container { layout: horizontal; }
-    FilePanel {
+    FilePanel, SearchPanel {
         border: solid gray; width: 1fr; height: 100%; padding: 0 1;
     }
-    FilePanel:focus-within { border: heavy cyan; }
+    FilePanel:focus-within, SearchPanel:focus-within { border: heavy cyan; }
     #path_label { height: 2; dock: bottom; }
     Input { layer: input; dock: bottom; height: 3; }
     """
@@ -183,11 +209,13 @@ class FileExplorerApp(App):
     def _validate_start_path(self, path: Optional[str]) -> str:
         if path:
             candidate_path = Path(path).expanduser().resolve()
-            if candidate_path.is_dir(): return str(candidate_path)
+            if candidate_path.is_dir():
+                return str(candidate_path)
         return str(Path.home())
 
     def _refresh_panels_at_path(self, path: Path) -> None:
-        if not path.exists(): return
+        if not path.exists():
+            return
         for panel in self.query(FilePanel):
             if Path(panel.start_path) == path or path.is_relative_to(Path(panel.start_path)):
                 panel.reload_tree()
@@ -207,13 +235,17 @@ class FileExplorerApp(App):
     @property
     def active_panel(self) -> FilePanel | None:
         focused = self.focused
-        if focused is None: return None
-        if isinstance(focused, FilePanel): return focused
-        if focused.parent and isinstance(focused.parent, FilePanel): return focused.parent
+        if focused is None:
+            return None
+        if isinstance(focused, FilePanel):
+            return focused
+        if focused.parent and isinstance(focused.parent, FilePanel):
+            return focused.parent
         return None
 
     def _prompt(self, placeholder: str, autocomplete: bool = False, value: str = "") -> None:
-        if self.query(Input): return
+        if self.query(Input):
+            return
         if autocomplete:
             input_widget = Input(placeholder=placeholder, value=value, id="path_input")
             self.mount(input_widget, PathAutoComplete(target="#path_input"))
@@ -227,23 +259,40 @@ class FileExplorerApp(App):
         action = self.current_action
         panel = self.action_target_panel
         event.input.remove()
-        try: self.query_one(PathAutoComplete).remove()
-        except: pass
+        try:
+            self.query_one(PathAutoComplete).remove()
+        except:
+            pass
         self.current_action = None
         self.action_target_panel = None
 
-        if not user_input and action not in ("extract", "copy_choice_prompt", "move_choice_prompt"):
+        if not user_input and action not in ("extract", "copy_choice_prompt", "move_choice_prompt", "find"):
+            return
+
+        if action == "find":
+            search_dir = Path(panel.start_path)
+            results = [p for p in search_dir.rglob(f"*{user_input}*")]
+            if results:
+                search_panel = SearchPanel(results)
+                self.query_one("#main_container").mount(search_panel)
+                search_panel.focus()
+            else:
+                self.notify("No results found.")
             return
 
         if action == "copy_choice_prompt":
             choice = user_input.lower()
             src_path = self.action_context.get("src_path")
             dest_dir = self.action_context.get("dest_dir")
-            if not src_path or not dest_dir: return
+            if not src_path or not dest_dir:
+                return
 
             did_copy = False
             if choice == 'r':
-                shutil.copy2(src_path, dest_dir)
+                if src_path.is_dir():
+                    shutil.copytree(src_path, dest_dir / src_path.name, dirs_exist_ok=True)
+                else:
+                    shutil.copy2(src_path, dest_dir)
                 did_copy = True
             elif choice == 'd':
                 shutil.copy2(src_path, generate_duplicate_path(dest_dir / src_path.name))
@@ -259,18 +308,21 @@ class FileExplorerApp(App):
             choice = user_input.lower()
             src_path = self.action_context.get("src_path")
             dest_dir = self.action_context.get("dest_dir")
-            if not src_path or not dest_dir: return
+            if not src_path or not dest_dir:
+                return
 
             src_parent = src_path.parent
             did_move = False
 
-            if choice == 'r': # Replace
+            if choice == 'r':  # Replace
                 dest_item = dest_dir / src_path.name
-                if dest_item.is_dir(): shutil.rmtree(dest_item)
-                else: dest_item.unlink()
+                if dest_item.is_dir():
+                    shutil.rmtree(dest_item)
+                else:
+                    dest_item.unlink()
                 shutil.move(str(src_path), str(dest_dir))
                 did_move = True
-            elif choice == 'd': # Duplicate name on move (copy -> delete source)
+            elif choice == 'd':  # Duplicate name on move (copy -> delete source)
                 new_path = generate_duplicate_path(dest_dir / src_path.name)
                 if src_path.is_dir():
                     shutil.copytree(src_path, new_path)
@@ -295,17 +347,22 @@ class FileExplorerApp(App):
             new_panel.focus()
             return
 
-        if not panel: return
+        if not panel:
+            return
 
         if action == "delete" and user_input.lower() == "y":
             try:
                 paths_to_refresh = {p.parent for p in panel.selected_paths if p.parent}
                 for path in list(panel.selected_paths):
-                    if path.is_dir(): shutil.rmtree(path)
-                    else: path.unlink()
+                    if path.is_dir():
+                        shutil.rmtree(path)
+                    else:
+                        path.unlink()
                 self.notify(f"Deleted {len(panel.selected_paths)} items.")
-                for path in paths_to_refresh: self._refresh_panels_at_path(path)
-            except Exception as e: self.notify(f"Error deleting: {e}", severity="error")
+                for path in paths_to_refresh:
+                    self._refresh_panels_at_path(path)
+            except Exception as e:
+                self.notify(f"Error deleting: {e}", severity="error")
 
         elif action == "archive":
             archive_path = Path(user_input).expanduser().resolve()
@@ -318,12 +375,15 @@ class FileExplorerApp(App):
                 with tempfile.TemporaryDirectory() as tmpdir:
                     for item_path in panel.selected_paths:
                         dest_path = Path(tmpdir) / item_path.name
-                        if item_path.is_dir(): shutil.copytree(item_path, dest_path)
-                        else: shutil.copy2(item_path, dest_path)
+                        if item_path.is_dir():
+                            shutil.copytree(item_path, dest_path)
+                        else:
+                            shutil.copy2(item_path, dest_path)
                     shutil.make_archive(archive_base_name, archive_format, tmpdir)
                 self.notify(f"Created archive '{archive_path.name}'.")
                 self._refresh_panels_at_path(archive_path.parent)
-            except Exception as e: self.notify(f"Error creating archive: {e}", severity="error")
+            except Exception as e:
+                self.notify(f"Error creating archive: {e}", severity="error")
 
         elif action == "extract":
             if panel.cursor_path:
@@ -333,7 +393,8 @@ class FileExplorerApp(App):
                     shutil.unpack_archive(panel.cursor_path, dest_path)
                     self.notify(f"Extracted to '{dest_path}'.")
                     self._refresh_panels_at_path(dest_path)
-                except Exception as e: self.notify(f"Error extracting archive: {e}", severity="error")
+                except Exception as e:
+                    self.notify(f"Error extracting archive: {e}", severity="error")
         elif action == "copy":
             dest_path = Path(user_input).expanduser().resolve()
             if not dest_path.is_dir():
@@ -360,22 +421,26 @@ class FileExplorerApp(App):
                 old_path.rename(new_path)
                 self.notify(f"Renamed to '{user_input}'.")
                 self._refresh_panels_at_path(new_path.parent)
-            except Exception as e: self.notify(f"Error renaming: {e}", severity="error")
+            except Exception as e:
+                self.notify(f"Error renaming: {e}", severity="error")
         elif action == "create_directory":
-            parent = panel.cursor_path if panel.cursor_path and panel.cursor_path.is_dir() else (panel.cursor_path.parent if panel.cursor_path else Path(panel.start_path))
+            parent = panel.cursor_path if panel.cursor_path and panel.cursor_path.is_dir() else (
+                panel.cursor_path.parent if panel.cursor_path else Path(panel.start_path))
             try:
                 new_dir = parent / user_input
                 new_dir.mkdir()
                 self.notify(f"Created directory '{user_input}'.")
                 self._refresh_panels_at_path(new_dir.parent)
-            except Exception as e: self.notify(f"Error creating directory: {e}", severity="error")
+            except Exception as e:
+                self.notify(f"Error creating directory: {e}", severity="error")
 
     def _process_move_queue(self) -> None:
         move_queue = self.action_context.get("move_queue", [])
         dest_dir = self.action_context.get("dest_dir")
 
         if not move_queue or not dest_dir:
-            if dest_dir: self.call_from_thread(self._refresh_panels_at_path, dest_dir)
+            if dest_dir:
+                self.call_from_thread(self._refresh_panels_at_path, dest_dir)
             self.call_from_thread(self.notify, "Move operation complete.")
             self.action_context = {}
             return
@@ -392,7 +457,8 @@ class FileExplorerApp(App):
         try:
             src_parent = src_path.parent
             shutil.move(str(src_path), str(dest_dir))
-            if src_parent: self.call_from_thread(self._refresh_panels_at_path, src_parent)
+            if src_parent:
+                self.call_from_thread(self._refresh_panels_at_path, src_parent)
             self.run_worker(self._process_move_queue, thread=True, exclusive=True)
         except Exception as e:
             self.call_from_thread(self.notify, f"Error moving {src_path.name}: {e}", severity="error")
@@ -417,8 +483,10 @@ class FileExplorerApp(App):
             return
 
         try:
-            if src_path.is_dir(): shutil.copytree(src_path, full_dest_path, dirs_exist_ok=True)
-            else: shutil.copy2(src_path, full_dest_path)
+            if src_path.is_dir():
+                shutil.copytree(src_path, full_dest_path, dirs_exist_ok=True)
+            else:
+                shutil.copy2(src_path, full_dest_path)
             self.call_from_thread(self._refresh_panels_at_path, dest_dir)
             self.run_worker(self._process_copy_queue, thread=True, exclusive=True)
         except Exception as e:
@@ -432,11 +500,23 @@ class FileExplorerApp(App):
             file_path = panel.cursor_path
             try:
                 self.notify(f"Opening {file_path.name}...")
-                if sys.platform == "win32": os.startfile(file_path)
-                elif sys.platform == "darwin": subprocess.run(["open", file_path], check=True)
-                else: subprocess.run(["xdg-open", file_path], check=True, stderr=subprocess.DEVNULL)
-            except FileNotFoundError: self.notify(f"Error: Command not found.", severity="error")
-            except Exception as e: self.notify(f"Error opening file: {e}", severity="error")
+                if sys.platform == "win32":
+                    os.startfile(file_path)
+                elif sys.platform == "darwin":
+                    subprocess.run(["open", file_path], check=True)
+                else:
+                    subprocess.run(["xdg-open", file_path], check=True, stderr=subprocess.DEVNULL)
+            except FileNotFoundError:
+                self.notify(f"Error: Command not found.", severity="error")
+            except Exception as e:
+                self.notify(f"Error opening file: {e}", severity="error")
+
+    def action_find(self) -> None:
+        panel = self.active_panel
+        if panel:
+            self.current_action = "find"
+            self.action_target_panel = panel
+            self._prompt("Find:")
 
     def action_add_panel(self) -> None:
         self.current_action = "add_panel"
@@ -446,12 +526,23 @@ class FileExplorerApp(App):
         all_panels = list(self.query(FilePanel))
         active = self.active_panel
         if len(all_panels) > 1 and active:
-            try: current_index = all_panels.index(active)
-            except ValueError: return
+            try:
+                current_index = all_panels.index(active)
+            except ValueError:
+                return
             active.remove()
             remaining_panels = list(self.query(FilePanel))
             focus_index = min(current_index, len(remaining_panels) - 1)
-            if remaining_panels: remaining_panels[focus_index].focus()
+            if remaining_panels:
+                remaining_panels[focus_index].focus()
+
+    def action_close_search_panel(self) -> None:
+        search_panels = self.query(SearchPanel)
+        if search_panels:
+            search_panels.last().remove()
+            if self.active_panel:
+                self.active_panel.focus()
+
 
     def action_archive_selected(self) -> None:
         panel = self.active_panel
@@ -469,7 +560,8 @@ class FileExplorerApp(App):
         if panel and panel.cursor_path and str(panel.cursor_path).endswith(SUPPORTED_ARCHIVE_EXTENSIONS):
             self.current_action = "extract"
             self.action_target_panel = panel
-            self._prompt("Extract to (blank for current dir):", autocomplete=True, value=str(panel.cursor_path.parent))
+            self._prompt("Extract to (blank for current dir):", autocomplete=True,
+                         value=str(panel.cursor_path.parent))
         else:
             self.notify("Highlighted item is not a supported archive.", severity="warning")
 
@@ -513,6 +605,7 @@ def main():
     start_dir = sys.argv[1] if len(sys.argv) > 1 else None
     app = FileExplorerApp(start_path=start_dir)
     app.run()
+
 
 if __name__ == "__main__":
     main()
