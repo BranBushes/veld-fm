@@ -1,3 +1,9 @@
+<p align="center">
+  <a href="https://github.com/BranBushes/veld-fm">
+    <img src="https://raw.githubusercontent.com/BranBushes/veld-fm/master/.assets/logo.png" alt="veld logo" width="150">
+  </a>
+</p>
+
 # veld
 
 A modern, tileable, terminal-based file manager built with Python and Textual.
