@@ -15,15 +15,19 @@ else:
         sys.exit("Error: 'toml' package not found. Please run 'pip install toml' or the setup script.")
 
 import platformdirs
+from PIL import Image
 from rich.style import Style
+from rich.syntax import Syntax
 from rich.text import Text
 from textual.app import App, ComposeResult
 from textual.containers import Horizontal, Vertical
 from textual.events import Key
-from textual.widgets import DirectoryTree, Footer, Input, Label, Tree
+from textual.widgets import DirectoryTree, Footer, Input, Label, Static, Tree
 from textual.widgets._directory_tree import DirEntry
 from textual.widgets.tree import TreeNode
 from textual_autocomplete import PathAutoComplete
+from term_image.image import from_file, AutoImage
+from term_image.exceptions import TermImageError
 
 # --- Configuration Setup ---
 APP_NAME = "veld-fm"
@@ -33,6 +37,7 @@ DEFAULT_KEYBINDINGS = {
     "quit": {"key": "q", "description": "Quit"},
     "add_panel": {"key": "o", "description": "Open Panel"},
     "close_panel": {"key": "w", "description": "Close Panel"},
+    "toggle_preview": {"key": "p", "description": "Toggle Preview"},
     "close_search_panel": {"key": "backspace", "description": "Close Search"},
     "toggle_selection": {"key": "space", "description": "Select"},
     "open_file": {"key": "enter", "description": "Open File"},
@@ -49,6 +54,7 @@ DEFAULT_KEYBINDINGS = {
 SUPPORTED_ARCHIVE_EXTENSIONS = tuple(
     ext for _, exts, _ in shutil.get_unpack_formats() for ext in exts
 )
+IMAGE_EXTENSIONS = (".png", ".jpg", ".jpeg", ".gif", ".bmp")
 
 
 def generate_duplicate_path(original_path: Path) -> Path:
@@ -124,6 +130,7 @@ class SelectableDirectoryTree(DirectoryTree):
     def on_tree_node_highlighted(self, event: Tree.NodeHighlighted[DirEntry]) -> None:
         if event.node and event.node.data:
             self.panel_ref.cursor_path = event.node.data.path
+            cast("FileExplorerApp", self.app).update_preview(event.node.data.path)
 
     def render_label(self, node: TreeNode[DirEntry], base_style: Style, style: Style) -> Text:
         rendered = super().render_label(node, base_style, style)
@@ -186,16 +193,48 @@ class FilePanel(Vertical):
             self.update_path_label()
 
 
+class PreviewPanel(Static):
+    def __init__(self, **kwargs) -> None:
+        super().__init__("Preview", **kwargs)
+
+    def update_preview(self, content) -> None:
+        self.update(content)
+
+
 class FileExplorerApp(App):
     DEFAULT_CSS = """
     Screen { layers: base input; }
-    #main_container { layout: horizontal; }
-    FilePanel, SearchPanel {
-        border: solid gray; width: 1fr; height: 100%; padding: 0 1;
+    #app_container {
+        layout: horizontal;
     }
-    FilePanel:focus-within, SearchPanel:focus-within { border: heavy cyan; }
-    #path_label { height: 2; dock: bottom; }
-    Input { layer: input; dock: bottom; height: 3; }
+    #main_container {
+        layout: horizontal;
+        width: 3fr;
+    }
+    #preview_panel {
+        width: 2fr;
+        height: 100%;
+        border: solid gray;
+        padding: 1;
+    }
+    FilePanel, SearchPanel {
+        border: solid gray;
+        width: 1fr;
+        height: 100%;
+        padding: 0 1;
+    }
+    FilePanel:focus-within, SearchPanel:focus-within {
+        border: heavy cyan;
+    }
+    #path_label {
+        height: 2;
+        dock: bottom;
+    }
+    Input {
+        layer: input;
+        dock: bottom;
+        height: 3;
+    }
     """
 
     def __init__(self, start_path: Optional[str] = None) -> None:
@@ -205,6 +244,16 @@ class FileExplorerApp(App):
         self.current_action: Optional[str] = None
         self.action_target_panel: Optional[FilePanel] = None
         self.action_context: dict = {}
+
+        # Pre-initialize term-image to avoid ghost input on first render.
+        # This forces the one-time terminal capability check before the event loop starts.
+        try:
+            dummy_image = Image.new("RGB", (1, 1))
+            str(AutoImage(dummy_image))
+        except (TermImageError, ImportError):
+            # This can happen in terminals without proper support or if Pillow isn't installed.
+            # We can ignore it as term-image will handle it gracefully later.
+            pass
 
     def _validate_start_path(self, path: Optional[str]) -> str:
         if path:
@@ -221,7 +270,11 @@ class FileExplorerApp(App):
                 panel.reload_tree()
 
     def compose(self) -> ComposeResult:
-        yield Horizontal(id="main_container")
+        yield Horizontal(
+            Horizontal(id="main_container"),
+            PreviewPanel(id="preview_panel"),
+            id="app_container",
+        )
         yield Footer()
 
     def on_mount(self) -> None:
@@ -242,6 +295,30 @@ class FileExplorerApp(App):
         if focused.parent and isinstance(focused.parent, FilePanel):
             return focused.parent
         return None
+
+    def update_preview(self, path: Path) -> None:
+        preview_panel = self.query_one(PreviewPanel)
+        if path.is_file():
+            if path.suffix.lower() in IMAGE_EXTENSIONS:
+                try:
+                    # Subtract 2 for padding
+                    width = self.query_one(PreviewPanel).size.width - 2
+                    image = from_file(path, width=width)
+                    preview_panel.update_preview(Text.from_ansi(str(image)))
+                except TermImageError as e:
+                    preview_panel.update_preview(f"Image preview failed:\n{e}")
+                except Exception as e:
+                    preview_panel.update_preview(f"Error: {e}")
+            else:
+                try:
+                    with open(path, "r", encoding="utf-8") as file:
+                        content = file.read(1024 * 10)  # Read up to 10KB
+                        syntax = Syntax(content, path.name, theme="monokai", line_numbers=True, word_wrap=True)
+                        preview_panel.update_preview(syntax)
+                except Exception:
+                    preview_panel.update_preview(f"Cannot preview binary file: {path.name}")
+        else:
+            preview_panel.update_preview("Directory - No preview available")
 
     def _prompt(self, placeholder: str, autocomplete: bool = False, value: str = "") -> None:
         if self.query(Input):
@@ -270,6 +347,9 @@ class FileExplorerApp(App):
             return
 
         if action == "find":
+            if not panel:
+                self.notify("Error: No active panel to search in.", severity="error")
+                return
             search_dir = Path(panel.start_path)
             results = [p for p in search_dir.rglob(f"*{user_input}*")]
             if results:
@@ -494,6 +574,14 @@ class FileExplorerApp(App):
             self.run_worker(self._process_copy_queue, thread=True, exclusive=True)
 
     # --- Action Methods ---
+    def action_toggle_preview(self) -> None:
+        """Toggles the visibility of the preview panel."""
+        preview_panel = self.query_one(PreviewPanel)
+        if preview_panel.styles.display == "none":
+            preview_panel.styles.display = "block"
+        else:
+            preview_panel.styles.display = "none"
+
     def action_open_file(self) -> None:
         panel = self.active_panel
         if panel and panel.cursor_path and panel.cursor_path.is_file():

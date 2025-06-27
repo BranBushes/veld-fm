@@ -28,9 +28,11 @@ A modern, tileable, terminal-based file manager built with Python and Textual.
 ## ✨ Features
 
 *   🗂️ **Tileable Panels:** Open multiple directory views side-by-side to streamline your workflow.
+*   **📂 Toggle-able File Previews:** Automatically see a preview of the highlighted file—text, code, and even images. Press a key to hide it when you need more space.
+*   **🔍 Find As You Type:** Recursively search for files and directories with instant results.
 *   ⌨️ **Intuitive Navigation:** Navigate your filesystem and switch between panels with familiar, ergonomic keybindings.
 *   ⚙️ **Powerful File Operations:** Perform common operations like copy, move, delete, and rename in the active panel.
-*   **ዚ  Archive Management:** Create and extract zip/tar archives directly within the file manager.
+*   **ዚ Archive Management:** Create and extract zip/tar archives directly within the file manager.
 *   🎨 **Customizable Keybindings:** Don't like the defaults? Change every keybinding by editing a simple configuration file.
 *   🐧 **Cross-Platform:** Built with Python and Textual, `veld` runs on Linux, macOS, and Windows.
 
@@ -46,8 +48,7 @@ pip install git+https://github.com/BranBushes/veld-fm.git
 
 Or using `uv`:
 ```bash
-uv pip install git+https://github.com/BranBushes/veld-fm.git
-```
+uv pip install git+https://github.com/BranBushes/veld-fm.git```
 
 This will install `veld` and make the `veld` command available in your terminal.
 
@@ -78,6 +79,8 @@ Keybindings are organized by function and can be fully customized (see Configura
 | **q**         | Quit the application   |
 | **o**         | Open a new panel       |
 | **w**         | Close the active panel |
+| **p**         | Toggle the preview panel|
+| **backspace** | Close the search panel |
 
 ### File & Directory Operations
 
@@ -85,6 +88,7 @@ Keybindings are organized by function and can be fully customized (see Configura
 |-------------|-----------------------|
 | **enter**   | Open file or directory |
 | **space**   | Toggle file selection |
+| **f**       | Find files/directories|
 | **n**       | Rename a file         |
 | **d**       | Create a directory    |
 | **r**       | Delete selected files |
