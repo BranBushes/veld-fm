@@ -48,6 +48,18 @@ SUPPORTED_ARCHIVE_EXTENSIONS = tuple(
     ext for _, exts, _ in shutil.get_unpack_formats() for ext in exts
 )
 
+def generate_duplicate_path(original_path: Path) -> Path:
+    parent = original_path.parent
+    stem = original_path.stem
+    suffix = original_path.suffix
+    counter = 1
+    while True:
+        new_name = f"{stem} ({counter}){suffix}"
+        new_path = parent / new_name
+        if not new_path.exists():
+            return new_path
+        counter += 1
+
 
 def load_or_create_config() -> dict:
     config_dir = Path(platformdirs.user_config_dir(APP_NAME, APP_AUTHOR))
@@ -95,21 +107,15 @@ class SelectableDirectoryTree(DirectoryTree):
         return rendered
 
     def on_key(self, event: Key) -> None:
-        """Called when the user presses a key."""
         if event.key == self.key_map.get("toggle_selection"):
             event.prevent_default()
             self.panel_ref.action_toggle_selection()
         elif event.key == self.key_map.get("open_file"):
             if self.panel_ref.cursor_path and self.panel_ref.cursor_path.is_file():
                 event.prevent_default()
-                # --- THIS IS THE FIX ---
-                # We `cast` self.app to our specific class to satisfy the linter.
                 cast("FileExplorerApp", self.app).action_open_file()
 
 class FilePanel(Vertical):
-    # We remove the incorrect override from here.
-    # app: "FileExplorerApp" <--- This line is deleted.
-
     def __init__(self, path: str, *, key_map: dict, **kwargs) -> None:
         super().__init__(**kwargs)
         self.start_path = path
@@ -153,14 +159,6 @@ class FilePanel(Vertical):
             self.directory_tree.refresh()
             self.update_path_label()
 
-    def handle_file_operation(self, operation: str, src_paths: list[Path], dest_path: Path) -> None:
-        for src_path in src_paths:
-            if operation == "move":
-                shutil.move(str(src_path), str(dest_path))
-            elif operation == "copy":
-                if src_path.is_dir(): shutil.copytree(src_path, dest_path / src_path.name)
-                else: shutil.copy(src_path, dest_path)
-
 
 class FileExplorerApp(App):
     DEFAULT_CSS = """
@@ -180,15 +178,16 @@ class FileExplorerApp(App):
         self.start_path = self._validate_start_path(start_path)
         self.current_action: Optional[str] = None
         self.action_target_panel: Optional[FilePanel] = None
+        self.action_context: dict = {}
 
     def _validate_start_path(self, path: Optional[str]) -> str:
         if path:
             candidate_path = Path(path).expanduser().resolve()
-            if candidate_path.is_dir():
-                return str(candidate_path)
+            if candidate_path.is_dir(): return str(candidate_path)
         return str(Path.home())
 
     def _refresh_panels_at_path(self, path: Path) -> None:
+        if not path.exists(): return
         for panel in self.query(FilePanel):
             if Path(panel.start_path) == path or path.is_relative_to(Path(panel.start_path)):
                 panel.reload_tree()
@@ -233,7 +232,60 @@ class FileExplorerApp(App):
         self.current_action = None
         self.action_target_panel = None
 
-        if not user_input and action not in ("extract",):
+        if not user_input and action not in ("extract", "copy_choice_prompt", "move_choice_prompt"):
+            return
+
+        if action == "copy_choice_prompt":
+            choice = user_input.lower()
+            src_path = self.action_context.get("src_path")
+            dest_dir = self.action_context.get("dest_dir")
+            if not src_path or not dest_dir: return
+
+            did_copy = False
+            if choice == 'r':
+                shutil.copy2(src_path, dest_dir)
+                did_copy = True
+            elif choice == 'd':
+                shutil.copy2(src_path, generate_duplicate_path(dest_dir / src_path.name))
+                did_copy = True
+
+            if did_copy:
+                self._refresh_panels_at_path(dest_dir)
+
+            self.run_worker(self._process_copy_queue, thread=True, exclusive=True)
+            return
+
+        elif action == "move_choice_prompt":
+            choice = user_input.lower()
+            src_path = self.action_context.get("src_path")
+            dest_dir = self.action_context.get("dest_dir")
+            if not src_path or not dest_dir: return
+
+            src_parent = src_path.parent
+            did_move = False
+
+            if choice == 'r': # Replace
+                dest_item = dest_dir / src_path.name
+                if dest_item.is_dir(): shutil.rmtree(dest_item)
+                else: dest_item.unlink()
+                shutil.move(str(src_path), str(dest_dir))
+                did_move = True
+            elif choice == 'd': # Duplicate name on move (copy -> delete source)
+                new_path = generate_duplicate_path(dest_dir / src_path.name)
+                if src_path.is_dir():
+                    shutil.copytree(src_path, new_path)
+                    shutil.rmtree(src_path)
+                else:
+                    shutil.copy2(src_path, new_path)
+                    src_path.unlink()
+                did_move = True
+
+            if src_parent:
+                self._refresh_panels_at_path(src_parent)
+            if did_move:
+                self._refresh_panels_at_path(dest_dir)
+
+            self.run_worker(self._process_move_queue, thread=True, exclusive=True)
             return
 
         if action == "add_panel":
@@ -252,12 +304,11 @@ class FileExplorerApp(App):
                     if path.is_dir(): shutil.rmtree(path)
                     else: path.unlink()
                 self.notify(f"Deleted {len(panel.selected_paths)} items.")
-                for path in paths_to_refresh:
-                    self._refresh_panels_at_path(path)
+                for path in paths_to_refresh: self._refresh_panels_at_path(path)
             except Exception as e: self.notify(f"Error deleting: {e}", severity="error")
 
         elif action == "archive":
-            archive_path = Path(user_input).expanduser()
+            archive_path = Path(user_input).expanduser().resolve()
             archive_format = archive_path.suffix.lstrip('.')
             if not archive_format:
                 self.notify("Error: Archive path must have an extension (e.g., .zip).", severity="error")
@@ -276,28 +327,29 @@ class FileExplorerApp(App):
 
         elif action == "extract":
             if panel.cursor_path:
-                dest_path = Path(user_input).expanduser() if user_input else panel.cursor_path.parent
+                dest_path = Path(user_input).expanduser().resolve() if user_input else panel.cursor_path.parent
                 dest_path.mkdir(parents=True, exist_ok=True)
                 try:
                     shutil.unpack_archive(panel.cursor_path, dest_path)
                     self.notify(f"Extracted to '{dest_path}'.")
                     self._refresh_panels_at_path(dest_path)
                 except Exception as e: self.notify(f"Error extracting archive: {e}", severity="error")
-        elif action in ("move", "copy"):
-            dest_path = Path(user_input).expanduser()
+        elif action == "copy":
+            dest_path = Path(user_input).expanduser().resolve()
             if not dest_path.is_dir():
                 self.notify(f"Error: '{dest_path}' is not a valid directory.", severity="error")
                 return
-            try:
-                src_paths = list(panel.selected_paths)
-                src_parent_dirs = {p.parent for p in src_paths if p.parent}
-                panel.handle_file_operation(action, src_paths, dest_path)
-                op_past_tense = "moved" if action == "move" else "copied"
-                self.notify(f"{len(src_paths)} item(s) {op_past_tense} to '{dest_path}'.")
-                if action == "move":
-                    for d in src_parent_dirs: self._refresh_panels_at_path(d)
-                self._refresh_panels_at_path(dest_path)
-            except Exception as e: self.notify(f"Error {action}ing: {e}", severity="error")
+            self.action_context = {"copy_queue": list(panel.selected_paths), "dest_dir": dest_path}
+            self.run_worker(self._process_copy_queue, thread=True, exclusive=True)
+
+        elif action == "move":
+            dest_path = Path(user_input).expanduser().resolve()
+            if not dest_path.is_dir():
+                self.notify(f"Error: '{dest_path}' is not a valid directory.", severity="error")
+                return
+            self.action_context = {"move_queue": list(panel.selected_paths), "dest_dir": dest_path}
+            self.run_worker(self._process_move_queue, thread=True, exclusive=True)
+
         elif action == "rename" and panel.cursor_path:
             try:
                 old_path = panel.cursor_path
@@ -318,24 +370,73 @@ class FileExplorerApp(App):
                 self._refresh_panels_at_path(new_dir.parent)
             except Exception as e: self.notify(f"Error creating directory: {e}", severity="error")
 
+    def _process_move_queue(self) -> None:
+        move_queue = self.action_context.get("move_queue", [])
+        dest_dir = self.action_context.get("dest_dir")
+
+        if not move_queue or not dest_dir:
+            if dest_dir: self.call_from_thread(self._refresh_panels_at_path, dest_dir)
+            self.call_from_thread(self.notify, "Move operation complete.")
+            self.action_context = {}
+            return
+
+        src_path = move_queue.pop(0)
+        full_dest_path = dest_dir / src_path.name
+
+        if full_dest_path.exists():
+            self.current_action = "move_choice_prompt"
+            self.action_context["src_path"] = src_path
+            self.call_from_thread(self._prompt, f"'{src_path.name}' exists. Replace (r), Duplicate (d), or Skip (s)?")
+            return
+
+        try:
+            src_parent = src_path.parent
+            shutil.move(str(src_path), str(dest_dir))
+            if src_parent: self.call_from_thread(self._refresh_panels_at_path, src_parent)
+            self.run_worker(self._process_move_queue, thread=True, exclusive=True)
+        except Exception as e:
+            self.call_from_thread(self.notify, f"Error moving {src_path.name}: {e}", severity="error")
+            self.run_worker(self._process_move_queue, thread=True, exclusive=True)
+
+    def _process_copy_queue(self) -> None:
+        copy_queue = self.action_context.get("copy_queue", [])
+        dest_dir = self.action_context.get("dest_dir")
+
+        if not copy_queue or not dest_dir:
+            self.call_from_thread(self.notify, "Copy operation complete.")
+            self.action_context = {}
+            return
+
+        src_path = copy_queue.pop(0)
+        full_dest_path = dest_dir / src_path.name
+
+        if full_dest_path.exists() and src_path.resolve() != full_dest_path.resolve():
+            self.current_action = "copy_choice_prompt"
+            self.action_context["src_path"] = src_path
+            self.call_from_thread(self._prompt, f"'{src_path.name}' exists. Replace (r), Duplicate (d), or Skip (s)?")
+            return
+
+        try:
+            if src_path.is_dir(): shutil.copytree(src_path, full_dest_path, dirs_exist_ok=True)
+            else: shutil.copy2(src_path, full_dest_path)
+            self.call_from_thread(self._refresh_panels_at_path, dest_dir)
+            self.run_worker(self._process_copy_queue, thread=True, exclusive=True)
+        except Exception as e:
+            self.call_from_thread(self.notify, f"Error copying {src_path.name}: {e}", severity="error")
+            self.run_worker(self._process_copy_queue, thread=True, exclusive=True)
+
     # --- Action Methods ---
     def action_open_file(self) -> None:
-        """Opens the highlighted file using the system's default application."""
         panel = self.active_panel
         if panel and panel.cursor_path and panel.cursor_path.is_file():
             file_path = panel.cursor_path
             try:
                 self.notify(f"Opening {file_path.name}...")
-                if sys.platform == "win32":
-                    os.startfile(file_path)
-                elif sys.platform == "darwin":  # macOS
-                    subprocess.run(["open", file_path], check=True)
-                else:  # Linux and other Unix-like OS
-                    subprocess.run(["xdg-open", file_path], check=True, stderr=subprocess.DEVNULL)
-            except FileNotFoundError:
-                self.notify(f"Error: Command not found. Cannot open file.", severity="error")
-            except Exception as e:
-                self.notify(f"Error opening file: {e}", severity="error")
+                if sys.platform == "win32": os.startfile(file_path)
+                elif sys.platform == "darwin": subprocess.run(["open", file_path], check=True)
+                else: subprocess.run(["xdg-open", file_path], check=True, stderr=subprocess.DEVNULL)
+            except FileNotFoundError: self.notify(f"Error: Command not found.", severity="error")
+            except Exception as e: self.notify(f"Error opening file: {e}", severity="error")
 
     def action_add_panel(self) -> None:
         self.current_action = "add_panel"
