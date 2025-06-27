@@ -2,8 +2,7 @@
 .venv/
 
 # Some files to help with development
-prompt_file.txt
-write_prompt.py
+backup_file.txt
 .ropeproject/
 __pycache__/
 veld_fm.egg-info/
