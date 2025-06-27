@@ -4,9 +4,9 @@ A modern, tileable, terminal-based file manager built with Python and Textual.
 
 <div align="center">
 
-![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)
-![Python Version](https://img.shields.io/badge/python-3.8+-brightgreen.svg)
-![Status](https://img.shields.io/badge/status-active-success.svg)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
+[![Python Version](https://img.shields.io/badge/python-3.9+-brightgreen.svg)](https://www.python.org/downloads/)
+[![PyPI version](https://img.shields.io/pypi/v/veld-fm.svg)](https://pypi.org/project/veld-fm/) <!-- Add this line when you publish to PyPI -->
 
 </div>
 
@@ -23,24 +23,26 @@ A modern, tileable, terminal-based file manager built with Python and Textual.
 *   🗂️ **Tileable Panels:** Open multiple directory views side-by-side to streamline your workflow.
 *   ⌨️ **Intuitive Navigation:** Navigate your filesystem and switch between panels with familiar, ergonomic keybindings.
 *   ⚙️ **Powerful File Operations:** Perform common operations like copy, move, delete, and rename in the active panel.
+*   **ዚ  Archive Management:** Create and extract zip/tar archives directly within the file manager.
 *   🎨 **Customizable Keybindings:** Don't like the defaults? Change every keybinding by editing a simple configuration file.
-*   ✨ **Modern Interface:** A clean and aesthetically pleasing interface that focuses on your files, not on chrome.
 *   🐧 **Cross-Platform:** Built with Python and Textual, `veld` runs on Linux, macOS, and Windows.
 
 ## 🚀 Installation
 
-1.  **Clone the repository:**
-    ```bash
-    git clone https://github.com/BranBushes/veld-fm.git
-    cd veld-fm
-    ```
+You need Python 3.9+ and `pip` installed.
 
-2.  **Run the setup script:**
-    This will install dependencies into a local virtual environment and create the system-wide `veld` command.
-    ```bash
-    chmod +x setup.sh
-    sudo ./setup.sh
-    ```
+Install the latest development version directly from GitHub:
+
+```bash
+pip install git+https://github.com/BranBushes/veld-fm.git
+```
+
+Or using `uv`:
+```bash
+uv pip install git+https://github.com/BranBushes/veld-fm.git
+```
+
+This will install `veld` and make the `veld` command available in your terminal.
 
 ## 💻 Usage
 
@@ -69,12 +71,8 @@ Keybindings are organized by function and can be fully customized (see Configura
 | **q**         | Quit the application   |
 | **o**         | Open a new panel       |
 | **w**         | Close the active panel |
-| **Tab**       | Focus next panel       |
-| **Shift+Tab** | Focus previous panel   |
 
 ### File & Directory Operations
-
-These actions apply to the currently active panel.
 
 | Key         | Action                |
 |-------------|-----------------------|
@@ -84,39 +82,21 @@ These actions apply to the currently active panel.
 | **r**       | Delete selected files |
 | **m**       | Move selected files   |
 | **c**       | Copy selected files   |
+| **a**       | Archive selected items|
+| **x**       | Extract highlighted archive |
 
 ## 🔧 Configuration
 
-`veld` allows you to customize all keybindings via a `config.toml` file.
+On the first run, a config file is created at `~/.config/veld-fm/config.toml`. You can edit this file to change keybindings.
 
-### Config File Location
+## 🧑‍💻 For Developers
 
-On the first run, a default config file will be created for you. The location varies by operating system:
-
-```sh
-# Linux & macOS
-~/.config/veld-fm/config.toml
-
-# Windows
-%APPDATA%\BranBushes\veld-fm\config\config.toml
-```
-
-### Example Configuration
-
-You can edit this file to change the keys for different actions.
-
-```toml
-# Veld File Manager Keybindings
-[keybindings]
-quit = "q" # Quit
-add_panel = "o" # Open Panel
-close_panel = "w" # Close Panel
-toggle_selection = "space" # Select
-rename = "n" # Rename
-create_directory = "d" # New Dir
-delete_selected = "r" # Delete
-move_selected = "m" # Move
-copy_selected = "c" # Copy
+To set up a development environment:
+```bash
+git clone https://github.com/BranBushes/veld-fm.git
+cd veld-fm
+./setup.sh # This creates a venv and installs in editable mode
+source .venv/bin/activate
 ```
 
 ---
