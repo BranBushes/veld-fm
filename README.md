@@ -6,7 +6,7 @@ A modern, tileable, terminal-based file manager built with Python and Textual.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 [![Python Version](https://img.shields.io/badge/python-3.9+-brightgreen.svg)](https://www.python.org/downloads/)
-[![Status](https://img.shields.io/badge/status-active-success.svg)]
+[![Status](https://img.shields.io/badge/status-active-success.svg)](https://github.com/BranBushes/veld-fm)
  <!--[![PyPI version](https://img.shields.io/pypi/v/veld-fm.svg)](https://pypi.org/project/veld-fm/)  Add this line after publishing to PyPI -->
 
 </div>
