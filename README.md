@@ -28,8 +28,8 @@ A modern, tileable, terminal-based file manager built with Python and Textual.
 ## ✨ Features
 
 *   🗂️ **Tileable Panels:** Open multiple directory views side-by-side to streamline your workflow.
-*   **📂 Toggle-able File Previews:** Automatically see a preview of the highlighted file—text, code, and even images. Press a key to hide it when you need more space.
-*   **🔍 Find As You Type:** Recursively search for files and directories with instant results.
+*   📂 **Toggle-able File Previews:** Automatically see a preview of the highlighted file—text, code, and even images. Press a key to hide it when you need more space.
+*   🔍 **Recursive File Search:** Instantly find files and directories within the current panel.
 *   ⌨️ **Intuitive Navigation:** Navigate your filesystem and switch between panels with familiar, ergonomic keybindings.
 *   ⚙️ **Powerful File Operations:** Perform common operations like copy, move, delete, and rename in the active panel.
 *   **ዚ Archive Management:** Create and extract zip/tar archives directly within the file manager.
