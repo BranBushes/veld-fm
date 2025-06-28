@@ -26,7 +26,7 @@ from textual.widgets import DirectoryTree, Footer, Input, Label, Static, Tree
 from textual.widgets._directory_tree import DirEntry
 from textual.widgets.tree import TreeNode
 from textual_autocomplete import PathAutoComplete
-from term_image.image import from_file, AutoImage
+from term_image.image import BlockImage
 from term_image.exceptions import TermImageError
 
 # --- Configuration Setup ---
@@ -246,10 +246,10 @@ class FileExplorerApp(App):
         self.action_context: dict = {}
 
         # Pre-initialize term-image to avoid ghost input on first render.
-        # This forces the one-time terminal capability check before the event loop starts.
+        # Use BlockImage specifically to avoid terminal queries.
         try:
             dummy_image = Image.new("RGB", (1, 1))
-            str(AutoImage(dummy_image))
+            str(BlockImage(dummy_image))
         except (TermImageError, ImportError):
             # This can happen in terminals without proper support or if Pillow isn't installed.
             # We can ignore it as term-image will handle it gracefully later.
@@ -303,7 +303,7 @@ class FileExplorerApp(App):
                 try:
                     # Subtract 2 for padding
                     width = self.query_one(PreviewPanel).size.width - 2
-                    image = from_file(path, width=width)
+                    image = BlockImage.from_file(path, width=width)
                     preview_panel.update_preview(Text.from_ansi(str(image)))
                 except TermImageError as e:
                     preview_panel.update_preview(f"Image preview failed:\n{e}")

@@ -48,7 +48,8 @@ pip install git+https://github.com/BranBushes/veld-fm.git
 
 Or using `uv`:
 ```bash
-uv pip install git+https://github.com/BranBushes/veld-fm.git```
+uv pip install git+https://github.com/BranBushes/veld-fm.git
+```
 
 This will install `veld` and make the `veld` command available in your terminal.
 
