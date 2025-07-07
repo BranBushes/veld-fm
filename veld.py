@@ -149,12 +149,6 @@ class SelectableDirectoryTree(DirectoryTree):
     def on_key(self, event: Key) -> None:
         key = event.key
 
-        # --- Custom Navigation & Selection Handling ---
-        # We check if the pressed key matches a custom binding. If it does,
-        # we perform the action and then crucially call event.stop()
-        # to prevent Textual's default key bindings from also firing,
-        # which caused the "double action" bug.
-
         if key == self.key_map.get("nav_up"):
             event.stop()
             self.action_cursor_up()
@@ -163,7 +157,7 @@ class SelectableDirectoryTree(DirectoryTree):
             self.action_cursor_down()
         elif key == self.key_map.get("nav_parent"):
             event.stop()
-            self.action_cursor_parent()  # Correct method to go to parent
+            self.action_cursor_parent()
         elif key == self.key_map.get("select_item"):
             event.stop()
             if self.cursor_node and self.cursor_node.data:
@@ -171,7 +165,7 @@ class SelectableDirectoryTree(DirectoryTree):
                 if path.is_file():
                     cast("FileExplorerApp", self.app).action_open_file()
                 elif path.is_dir():
-                    self.action_toggle_node() # Expands/collapses directory
+                    self.action_toggle_node()
         elif key == self.key_map.get("toggle_selection"):
             event.stop()
             self.panel_ref.action_toggle_selection()
@@ -274,13 +268,14 @@ class FileExplorerApp(App):
         self.action_target_panel: Optional[FilePanel] = None
         self.action_context: dict = {}
 
-        # Pre-initialize term-image to avoid ghost input on first render.
-        # Use BlockImage specifically to avoid terminal queries.
+        # Pre-initialize term-image to get terminal queries out of the way
+        # before the event loop starts. Passing a width is crucial as it
+        # triggers the aspect-ratio query that was causing the issue.
         try:
             dummy_image = Image.new("RGB", (1, 1))
-            str(BlockImage(dummy_image))
+            str(BlockImage(dummy_image, width=10)) # The fix is here
         except (TermImageError, ImportError):
-            # This can happen in terminals without proper support or if Pillow isn't installed.
+            # This can happen in terminals without proper support.
             # We can ignore it as term-image will handle it gracefully later.
             pass
 
@@ -307,8 +302,6 @@ class FileExplorerApp(App):
         yield Footer()
 
     def on_mount(self) -> None:
-        # Bind all actions EXCEPT the ones that are now handled exclusively
-        # by the SelectableDirectoryTree's on_key method.
         actions_handled_by_widget = [
             "nav_up", "nav_down", "nav_parent", "select_item", "toggle_selection"
         ]
@@ -378,7 +371,7 @@ class FileExplorerApp(App):
         self.current_action = None
         self.action_target_panel = None
 
-        if not user_input and action not in ("extract", "copy_choice_prompt", "move_choice_prompt", "find"):
+        if not user_input and action not in ("extract_archive", "copy_choice_prompt", "move_choice_prompt", "find", "delete_selected"):
             return
 
         if action == "find":
@@ -473,9 +466,11 @@ class FileExplorerApp(App):
                         shutil.rmtree(path)
                     else:
                         path.unlink()
-                self.notify(f"Deleted {len(panel.selected_paths)} items.")
+                panel.selected_paths.clear()
+                self.notify(f"Deleted items.")
                 for path in paths_to_refresh:
                     self._refresh_panels_at_path(path)
+                panel.update_path_label()
             except Exception as e:
                 self.notify(f"Error deleting: {e}", severity="error")
 
@@ -670,7 +665,7 @@ class FileExplorerApp(App):
     def action_archive_selected(self) -> None:
         panel = self.active_panel
         if panel and panel.selected_paths:
-            self.current_action = "archive"
+            self.current_action = "archive_selected"
             self.action_target_panel = panel
             current_dir = panel.cursor_path.parent if panel.cursor_path else Path(panel.start_path)
             first_item_name = Path(list(panel.selected_paths)[0]).stem
@@ -681,7 +676,7 @@ class FileExplorerApp(App):
     def action_extract_archive(self) -> None:
         panel = self.active_panel
         if panel and panel.cursor_path and str(panel.cursor_path).endswith(SUPPORTED_ARCHIVE_EXTENSIONS):
-            self.current_action = "extract"
+            self.current_action = "extract_archive"
             self.action_target_panel = panel
             self._prompt("Extract to (blank for current dir):", autocomplete=True,
                          value=str(panel.cursor_path.parent))
@@ -698,14 +693,14 @@ class FileExplorerApp(App):
     def action_move_selected(self) -> None:
         panel = self.active_panel
         if panel and panel.selected_paths:
-            self.current_action = "move"
+            self.current_action = "move_selected"
             self.action_target_panel = panel
             self._prompt("Move to:", autocomplete=True)
 
     def action_copy_selected(self) -> None:
         panel = self.active_panel
         if panel and panel.selected_paths:
-            self.current_action = "copy"
+            self.current_action = "copy_selected"
             self.action_target_panel = panel
             self._prompt("Copy to:", autocomplete=True)
 
