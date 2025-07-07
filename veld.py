@@ -34,13 +34,19 @@ APP_NAME = "veld-fm"
 APP_AUTHOR = "BranBushes"
 
 DEFAULT_KEYBINDINGS = {
+    # App & Panel Management
     "quit": {"key": "q", "description": "Quit"},
     "add_panel": {"key": "o", "description": "Open Panel"},
     "close_panel": {"key": "w", "description": "Close Panel"},
     "toggle_preview": {"key": "p", "description": "Toggle Preview"},
     "close_search_panel": {"key": "backspace", "description": "Close Search"},
+    # Navigation & Selection
+    "nav_up": {"key": "up", "description": "Navigate Up"},
+    "nav_down": {"key": "down", "description": "Navigate Down"},
+    "nav_parent": {"key": "left", "description": "Go to Parent"},
+    "select_item": {"key": "enter", "description": "Open / Enter Dir"},
     "toggle_selection": {"key": "space", "description": "Select"},
-    "open_file": {"key": "enter", "description": "Open File"},
+    # File Operations
     "find": {"key": "f", "description": "Find"},
     "rename": {"key": "n", "description": "Rename"},
     "create_directory": {"key": "d", "description": "New Dir"},
@@ -50,6 +56,7 @@ DEFAULT_KEYBINDINGS = {
     "archive_selected": {"key": "a", "description": "Archive"},
     "extract_archive": {"key": "x", "description": "Extract"},
 }
+
 
 SUPPORTED_ARCHIVE_EXTENSIONS = tuple(
     ext for _, exts, _ in shutil.get_unpack_formats() for ext in exts
@@ -124,6 +131,7 @@ class SelectableDirectoryTree(DirectoryTree):
         super().__init__(path, id=id)
 
     def on_mount(self) -> None:
+        super().on_mount()
         if self.cursor_node and self.cursor_node.data:
             self.panel_ref.cursor_path = self.cursor_node.data.path
 
@@ -139,13 +147,34 @@ class SelectableDirectoryTree(DirectoryTree):
         return rendered
 
     def on_key(self, event: Key) -> None:
-        if event.key == self.key_map.get("toggle_selection"):
-            event.prevent_default()
+        key = event.key
+
+        # --- Custom Navigation & Selection Handling ---
+        # We check if the pressed key matches a custom binding. If it does,
+        # we perform the action and then crucially call event.stop()
+        # to prevent Textual's default key bindings from also firing,
+        # which caused the "double action" bug.
+
+        if key == self.key_map.get("nav_up"):
+            event.stop()
+            self.action_cursor_up()
+        elif key == self.key_map.get("nav_down"):
+            event.stop()
+            self.action_cursor_down()
+        elif key == self.key_map.get("nav_parent"):
+            event.stop()
+            self.action_cursor_parent()  # Correct method to go to parent
+        elif key == self.key_map.get("select_item"):
+            event.stop()
+            if self.cursor_node and self.cursor_node.data:
+                path = self.cursor_node.data.path
+                if path.is_file():
+                    cast("FileExplorerApp", self.app).action_open_file()
+                elif path.is_dir():
+                    self.action_toggle_node() # Expands/collapses directory
+        elif key == self.key_map.get("toggle_selection"):
+            event.stop()
             self.panel_ref.action_toggle_selection()
-        elif event.key == self.key_map.get("open_file"):
-            if self.panel_ref.cursor_path and self.panel_ref.cursor_path.is_file():
-                event.prevent_default()
-                cast("FileExplorerApp", self.app).action_open_file()
 
 
 class FilePanel(Vertical):
@@ -278,8 +307,14 @@ class FileExplorerApp(App):
         yield Footer()
 
     def on_mount(self) -> None:
+        # Bind all actions EXCEPT the ones that are now handled exclusively
+        # by the SelectableDirectoryTree's on_key method.
+        actions_handled_by_widget = [
+            "nav_up", "nav_down", "nav_parent", "select_item", "toggle_selection"
+        ]
         for action, details in DEFAULT_KEYBINDINGS.items():
-            self.bind(self.key_map.get(action, details["key"]), action, description=details["description"])
+            if action not in actions_handled_by_widget:
+                self.bind(self.key_map.get(action, details["key"]), action, description=details["description"])
 
         first_panel = FilePanel(self.start_path, key_map=self.key_map)
         self.query_one("#main_container").mount(first_panel)
@@ -430,7 +465,7 @@ class FileExplorerApp(App):
         if not panel:
             return
 
-        if action == "delete" and user_input.lower() == "y":
+        if action == "delete_selected" and user_input.lower() == "y":
             try:
                 paths_to_refresh = {p.parent for p in panel.selected_paths if p.parent}
                 for path in list(panel.selected_paths):
@@ -444,7 +479,7 @@ class FileExplorerApp(App):
             except Exception as e:
                 self.notify(f"Error deleting: {e}", severity="error")
 
-        elif action == "archive":
+        elif action == "archive_selected":
             archive_path = Path(user_input).expanduser().resolve()
             archive_format = archive_path.suffix.lstrip('.')
             if not archive_format:
@@ -465,7 +500,7 @@ class FileExplorerApp(App):
             except Exception as e:
                 self.notify(f"Error creating archive: {e}", severity="error")
 
-        elif action == "extract":
+        elif action == "extract_archive":
             if panel.cursor_path:
                 dest_path = Path(user_input).expanduser().resolve() if user_input else panel.cursor_path.parent
                 dest_path.mkdir(parents=True, exist_ok=True)
@@ -475,7 +510,7 @@ class FileExplorerApp(App):
                     self._refresh_panels_at_path(dest_path)
                 except Exception as e:
                     self.notify(f"Error extracting archive: {e}", severity="error")
-        elif action == "copy":
+        elif action == "copy_selected":
             dest_path = Path(user_input).expanduser().resolve()
             if not dest_path.is_dir():
                 self.notify(f"Error: '{dest_path}' is not a valid directory.", severity="error")
@@ -483,7 +518,7 @@ class FileExplorerApp(App):
             self.action_context = {"copy_queue": list(panel.selected_paths), "dest_dir": dest_path}
             self.run_worker(self._process_copy_queue, thread=True, exclusive=True)
 
-        elif action == "move":
+        elif action == "move_selected":
             dest_path = Path(user_input).expanduser().resolve()
             if not dest_path.is_dir():
                 self.notify(f"Error: '{dest_path}' is not a valid directory.", severity="error")
@@ -573,7 +608,7 @@ class FileExplorerApp(App):
             self.call_from_thread(self.notify, f"Error copying {src_path.name}: {e}", severity="error")
             self.run_worker(self._process_copy_queue, thread=True, exclusive=True)
 
-    # --- Action Methods ---
+    # --- Action Methods (bound to keys in on_mount) ---
     def action_toggle_preview(self) -> None:
         """Toggles the visibility of the preview panel."""
         preview_panel = self.query_one(PreviewPanel)
@@ -656,7 +691,7 @@ class FileExplorerApp(App):
     def action_delete_selected(self) -> None:
         panel = self.active_panel
         if panel and panel.selected_paths:
-            self.current_action = "delete"
+            self.current_action = "delete_selected"
             self.action_target_panel = panel
             self._prompt(f"Delete {len(panel.selected_paths)} items? (y/n)")
 
