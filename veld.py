@@ -1,4 +1,5 @@
 import os
+import shlex
 import shutil
 import subprocess
 import sys
@@ -37,6 +38,7 @@ DEFAULT_KEYBINDINGS = {
     # App & Panel Management
     "quit": {"key": "q", "description": "Quit"},
     "add_panel": {"key": "o", "description": "Open Panel"},
+    "open_panel_at_selection": {"key": "O", "description": "Open Panel at Selection"},
     "close_panel": {"key": "w", "description": "Close Panel"},
     "toggle_preview": {"key": "p", "description": "Toggle Preview"},
     "close_search_panel": {"key": "backspace", "description": "Close Search"},
@@ -47,6 +49,7 @@ DEFAULT_KEYBINDINGS = {
     "select_item": {"key": "enter", "description": "Open / Enter Dir"},
     "toggle_selection": {"key": "space", "description": "Select"},
     # File Operations
+    "open_with_prompt": {"key": "e", "description": "Open with..."},
     "find": {"key": "f", "description": "Find"},
     "rename": {"key": "n", "description": "Rename"},
     "create_directory": {"key": "d", "description": "New Dir"},
@@ -455,6 +458,40 @@ class FileExplorerApp(App):
             new_panel.focus()
             return
 
+        # DEFINITIVE FIX: Separated parsing from execution to fix the unbound variable error.
+        elif action == "open_with_prompt":
+            file_path = self.action_context.get("file_path")
+            if not file_path or not user_input:
+                return
+
+            try:
+                # 1. First, try to parse the user's command string.
+                command_parts = shlex.split(user_input)
+            except ValueError as e:
+                # This catches errors like unclosed quotes.
+                self.notify(f"Error parsing command: {e}", severity="error")
+                return
+
+            if not command_parts:
+                self.notify("Error: No command entered.", severity="error")
+                return
+
+            # 2. Now that parsing is successful and we know the command is not empty,
+            #    we can safely access the command name.
+            command_name = command_parts[0]
+            full_command = command_parts + [str(file_path)]
+
+            try:
+                # 3. In a separate block, execute the command.
+                subprocess.Popen(full_command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                self.notify(f"Executing: {' '.join(full_command)}")
+            except FileNotFoundError:
+                # This error is from Popen, and command_name is guaranteed to be defined here.
+                self.notify(f"Error: Command not found '{command_name}'.", severity="error")
+            except Exception as e:
+                self.notify(f"Error executing command: {e}", severity="error")
+
+
         if not panel:
             return
 
@@ -623,11 +660,25 @@ class FileExplorerApp(App):
                 elif sys.platform == "darwin":
                     subprocess.run(["open", file_path], check=True)
                 else:
-                    subprocess.run(["xdg-open", file_path], check=True, stderr=subprocess.DEVNULL)
+                    # Use Popen to avoid blocking and detach the process.
+                    subprocess.Popen(["xdg-open", file_path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             except FileNotFoundError:
-                self.notify(f"Error: Command not found.", severity="error")
+                self.notify(f"Error: xdg-open command not found.", severity="error")
             except Exception as e:
                 self.notify(f"Error opening file: {e}", severity="error")
+
+    # New feature: Open with a custom command
+    def action_open_with_prompt(self) -> None:
+        """Opens a file using a command specified by the user."""
+        panel = self.active_panel
+        if panel and panel.cursor_path and panel.cursor_path.is_file():
+            self.current_action = "open_with_prompt"
+            self.action_target_panel = panel
+            self.action_context = {"file_path": panel.cursor_path}
+            default_opener = "xdg-open" if sys.platform != "win32" and sys.platform != "darwin" else ""
+            self._prompt("Open with:", value=default_opener)
+        else:
+            self.notify("Please select a file to open.", severity="warning")
 
     def action_find(self) -> None:
         panel = self.active_panel
@@ -639,6 +690,18 @@ class FileExplorerApp(App):
     def action_add_panel(self) -> None:
         self.current_action = "add_panel"
         self._prompt("Open path:", autocomplete=True)
+
+    # New feature: Open a new panel at the currently selected directory
+    def action_open_panel_at_selection(self) -> None:
+        """Opens a new panel at the currently selected directory."""
+        panel = self.active_panel
+        if panel and panel.cursor_path and panel.cursor_path.is_dir():
+            new_panel = FilePanel(path=str(panel.cursor_path), key_map=self.key_map)
+            self.query_one("#main_container").mount(new_panel)
+            new_panel.focus()
+        else:
+            self.notify("Please select a directory to open in a new panel.", severity="warning")
+
 
     def action_close_panel(self) -> None:
         all_panels = list(self.query(FilePanel))
