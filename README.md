@@ -35,6 +35,7 @@ A modern, tileable, terminal-based file manager built with Python and Textual.
 *   **ዚ Archive Management:** Create and extract zip/tar archives directly within the file manager.
 *   🎨 **Customizable Keybindings:** Don't like the defaults? Change every keybinding by editing a simple configuration file.
 *   🐧 **Cross-Platform:** Built with Python and Textual, `veld` runs on Linux, macOS, and Windows.
+*   **Vim Mode:** Queue up file operations and execute them in a batch, Vim-style.
 
 ## 🚀 Installation
 
@@ -69,6 +70,17 @@ veld ~/Documents
 
 Use `Tab` and `Shift+Tab` to cycle focus between open panels. The active panel is highlighted with a colored border.
 
+### Vim Mode
+
+Veld includes an optional Vim-style command mode for batching file operations.
+
+*   **Enter Command Mode:** Press `:` to open the command input.
+*   `:vim` - Toggles Vim Mode on or off.
+*   `:w` - Executes (writes) all queued actions.
+*   `:c` - Clears all queued actions.
+
+When Vim Mode is active, a list of queued actions will appear in the bottom-right corner.
+
 ## ⌨️ Keybindings
 
 Keybindings are organized by function and can be fully customized (see Configuration section).
@@ -78,23 +90,26 @@ Keybindings are organized by function and can be fully customized (see Configura
 | Key           | Action                 |
 |---------------|------------------------|
 | **q**         | Quit the application   |
-| **o**         | Open a new panel       |
+| **o**         | Open a new panel (prompts for path) |
+| **O** (Shift+o)| Open panel at selected directory |
 | **w**         | Close the active panel |
 | **p**         | Toggle the preview panel|
 | **backspace** | Close the search panel |
+| **:**         | Enter Command Mode     |
 
 ### File & Directory Operations
 
 | Key         | Action                |
 |-------------|-----------------------|
-| **enter**   | Open file or directory |
+| **enter**   | Open file or directory (default app) |
+| **e**       | Open file with... (prompts for command) |
 | **space**   | Toggle file selection |
 | **f**       | Find files/directories|
 | **n**       | Rename a file         |
 | **d**       | Create a directory    |
-| **r**       | Delete selected files |
+| **r**       | Delete selected files (queues in Vim Mode) |
 | **m**       | Move selected files   |
-| **c**       | Copy selected files   |
+| **c**       | Copy selected files (queues in Vim Mode) |
 | **a**       | Archive selected items|
 | **x**       | Extract highlighted archive |
 
