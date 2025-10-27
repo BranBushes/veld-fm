@@ -19,19 +19,17 @@ else:
         )
 
 import platformdirs
-from PIL import Image
 from rich.style import Style
 from rich.syntax import Syntax
 from rich.text import Text
 from textual.app import App, ComposeResult
-from textual.containers import Horizontal, Vertical
+from textual.containers import Horizontal, Vertical, Container
 from textual.events import Key
 from textual.widgets import DirectoryTree, Footer, Input, Label, Log, Static, Tree
 from textual.widgets._directory_tree import DirEntry
 from textual.widgets.tree import TreeNode
 from textual_autocomplete import PathAutoComplete
-from term_image.image import BlockImage
-from term_image.exceptions import TermImageError
+from textual_image.widget import Image as ImageWidget
 
 # --- Configuration Setup ---
 APP_NAME = "veld-fm"
@@ -230,14 +228,6 @@ class FilePanel(Vertical):
             self.update_path_label()
 
 
-class PreviewPanel(Static):
-    def __init__(self, **kwargs) -> None:
-        super().__init__("Preview", **kwargs)
-
-    def update_preview(self, content) -> None:
-        self.update(content)
-
-
 class FileExplorerApp(App):
     DEFAULT_CSS = """
     Screen { layers: base input; }
@@ -278,7 +268,6 @@ class FileExplorerApp(App):
         background: $panel;
         display: none;
         padding: 0 1;
-        /* DEFINITIVE FIX: Ensure the Log widget is scrollable */
         overflow-y: auto;
     }
     """
@@ -292,12 +281,6 @@ class FileExplorerApp(App):
         self.action_context: dict = {}
         self.vim_mode = False
         self.action_queue: Deque[tuple] = deque()
-
-        try:
-            dummy_image = Image.new("RGB", (1, 1))
-            str(BlockImage(dummy_image, width=10))
-        except (TermImageError, ImportError):
-            pass
 
     def on_key(self, event: Key) -> None:
         if event.character == ":" and not self.query(Input):
@@ -323,8 +306,7 @@ class FileExplorerApp(App):
     def compose(self) -> ComposeResult:
         yield Horizontal(
             Horizontal(id="main_container"),
-            PreviewPanel(id="preview_panel"),
-            # DEFINITIVE FIX: Remove the invalid 'wrap' parameter
+            Container(id="preview_panel"),
             Log(id="vim_queue"),
             id="app_container",
         )
@@ -362,17 +344,15 @@ class FileExplorerApp(App):
         return None
 
     def update_preview(self, path: Path) -> None:
-        preview_panel = self.query_one(PreviewPanel)
+        preview_panel = self.query_one("#preview_panel")
+        preview_panel.remove_children()
+
         if path.is_file():
             if path.suffix.lower() in IMAGE_EXTENSIONS:
                 try:
-                    width = self.query_one(PreviewPanel).size.width - 2
-                    image = BlockImage.from_file(path, width=width)
-                    preview_panel.update_preview(Text.from_ansi(str(image)))
-                except TermImageError as e:
-                    preview_panel.update_preview(f"Image preview failed:\n{e}")
+                    preview_panel.mount(ImageWidget(str(path)))
                 except Exception as e:
-                    preview_panel.update_preview(f"Error: {e}")
+                    preview_panel.mount(Static(f"Image preview failed:\n{e}"))
             else:
                 try:
                     with open(path, "r", encoding="utf-8") as file:
@@ -384,13 +364,13 @@ class FileExplorerApp(App):
                             line_numbers=True,
                             word_wrap=True,
                         )
-                        preview_panel.update_preview(syntax)
+                        preview_panel.mount(syntax)
                 except Exception:
-                    preview_panel.update_preview(
-                        f"Cannot preview binary file: {path.name}"
+                    preview_panel.mount(
+                        Static(f"Cannot preview binary file: {path.name}")
                     )
         else:
-            preview_panel.update_preview("Directory - No preview available")
+            preview_panel.mount(Static("Directory - No preview available"))
 
     def _prompt(
         self, placeholder: str, autocomplete: bool = False, value: str = ""
@@ -417,17 +397,13 @@ class FileExplorerApp(App):
         self.current_action = None
         self.action_target_panel = None
 
-        if (
-            not user_input
-            and action
-            not in (
-                "extract_archive",
-                "copy_choice_prompt",
-                "move_choice_prompt",
-                "find",
-                "delete_selected",
-                "command_mode",
-            )
+        if not user_input and action not in (
+            "extract_archive",
+            "copy_choice_prompt",
+            "move_choice_prompt",
+            "find",
+            "delete_selected",
+            "command_mode",
         ):
             return
 
@@ -459,12 +435,16 @@ class FileExplorerApp(App):
             did_copy = False
             if choice == "r":
                 if src_path.is_dir():
-                    shutil.copytree(src_path, dest_dir / src_path.name, dirs_exist_ok=True)
+                    shutil.copytree(
+                        src_path, dest_dir / src_path.name, dirs_exist_ok=True
+                    )
                 else:
                     shutil.copy2(src_path, dest_dir)
                 did_copy = True
             elif choice == "d":
-                shutil.copy2(src_path, generate_duplicate_path(dest_dir / src_path.name))
+                shutil.copy2(
+                    src_path, generate_duplicate_path(dest_dir / src_path.name)
+                )
                 did_copy = True
 
             if did_copy:
@@ -619,7 +599,9 @@ class FileExplorerApp(App):
         elif action == "copy_selected_vim":
             dest_path = Path(user_input).expanduser().resolve()
             if not dest_path.is_dir():
-                self.notify(f"'{dest_path}' is not a valid directory.", severity="error")
+                self.notify(
+                    f"'{dest_path}' is not a valid directory.", severity="error"
+                )
                 return
             for path in panel.selected_paths:
                 self.queue_action("copy", path, dest_path / path.name)
@@ -801,7 +783,7 @@ class FileExplorerApp(App):
         self.update_vim_queue_display()
 
     def action_toggle_preview(self) -> None:
-        preview_panel = self.query_one(PreviewPanel)
+        preview_panel = self.query_one("#preview_panel")
         if preview_panel.styles.display == "none":
             preview_panel.styles.display = "block"
         else:
@@ -835,7 +817,9 @@ class FileExplorerApp(App):
             self.action_target_panel = panel
             self.action_context = {"file_path": panel.cursor_path}
             default_opener = (
-                "xdg-open" if sys.platform != "win32" and sys.platform != "darwin" else ""
+                "xdg-open"
+                if sys.platform != "win32" and sys.platform != "darwin"
+                else ""
             )
             self._prompt("Open with:", value=default_opener)
         else:
@@ -907,8 +891,10 @@ class FileExplorerApp(App):
 
     def action_extract_archive(self) -> None:
         panel = self.active_panel
-        if panel and panel.cursor_path and str(panel.cursor_path).endswith(
-            SUPPORTED_ARCHIVE_EXTENSIONS
+        if (
+            panel
+            and panel.cursor_path
+            and str(panel.cursor_path).endswith(SUPPORTED_ARCHIVE_EXTENSIONS)
         ):
             self.current_action = "extract_archive"
             self.action_target_panel = panel

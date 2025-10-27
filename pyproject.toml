@@ -19,8 +19,8 @@ dependencies = [
     "toml==0.10.2",
     "typing_extensions==4.14.0",
     "uc-micro-py==1.0.3",
-    "term-image==0.7.2",
     "Pillow==10.4.0",
+    "textual-image==0.8.4",
 ]
 
 [build-system]
